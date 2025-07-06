@@ -13,18 +13,15 @@ from telegram.ext import (
 import nest_asyncio
 import asyncio
 
-# Configuração de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Estados e dados temporários por usuário
 user_states = {}
 temp_data = {}
 
-# 📦 Banco de dados
 def get_db():
     conn = sqlite3.connect("despesas.db")
     conn.row_factory = sqlite3.Row
@@ -45,7 +42,6 @@ def init_db():
         ''')
         conn.commit()
 
-# ⌨️ Teclados
 def teclado_principal():
     buttons = [
         [KeyboardButton("🚀 Iniciar")],
@@ -62,7 +58,6 @@ def teclado_tipo_conta():
     tipos = [["Simples", "Parcelada"], ["Repetir Semanal", "Repetir Mensal"]]
     return ReplyKeyboardMarkup(tipos, resize_keyboard=True, one_time_keyboard=True)
 
-# Função para adicionar meses respeitando fim de mês
 def add_months(dt, months):
     month = dt.month - 1 + months
     year = dt.year + month // 12
@@ -72,7 +67,15 @@ def add_months(dt, months):
                        31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month-1])
     return datetime.date(year, month, day)
 
-# 🟢 /start
+def data_str_para_iso(data_str):
+    dia, mes, ano = map(int, data_str.split("/"))
+    dt = datetime.date(ano, mes, dia)
+    return dt.isoformat()
+
+def data_iso_para_str(data_iso):
+    dt = datetime.date.fromisoformat(data_iso)
+    return dt.strftime("%d/%m/%Y")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Olá! Bem-vindo ao *Gerenciador de Despesas*!",
@@ -82,7 +85,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states.pop(update.message.from_user.id, None)
     temp_data.pop(update.message.from_user.id, None)
 
-# 📊 Relatórios
 async def relatorio_mensal(update: Update):
     hoje = datetime.date.today()
     await relatorio_por_mes(update, hoje.month, hoje.year)
@@ -104,7 +106,7 @@ async def relatorio_por_mes(update: Update, mes: int, ano: int):
     total_pagas = total_pendentes = 0
     for desc, val, venc, status in contas:
         emoji = "✅" if status == "paga" else "⏳"
-        texto += f"{emoji} *{desc}* - R${val:.2f} - Venc: `{venc}`\n"
+        texto += f"{emoji} *{desc}* - R${val:.2f} - Venc: `{data_iso_para_str(venc)}`\n"
         if status == "paga":
             total_pagas += val
         else:
@@ -113,7 +115,6 @@ async def relatorio_por_mes(update: Update, mes: int, ano: int):
 
     await update.message.reply_text(texto, parse_mode="Markdown")
 
-# Função para renovar conta ao marcar paga (se for recorrente)
 def renovar_conta(conn, conta):
     tipo = conta["tipo"]
     if tipo in ("mensal", "semanal"):
@@ -122,7 +123,7 @@ def renovar_conta(conn, conta):
             vencimento_atual = datetime.date.fromisoformat(conta["vencimento"])
             if tipo == "mensal":
                 novo_venc = add_months(vencimento_atual, 1)
-            else:  # semanal
+            else:
                 novo_venc = vencimento_atual + datetime.timedelta(weeks=1)
 
             conn.execute("""
@@ -136,7 +137,6 @@ def renovar_conta(conn, conta):
                 parcelas_restantes - 1
             ))
 
-# ⏺️ Botões Inline
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -185,7 +185,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Erro no button_handler: {e}", exc_info=True)
         await query.edit_message_text(f"❌ Ocorreu um erro: {e}")
 
-# 💾 Contas repetidas
 async def salvar_contas_repetidas(uid, update):
     tipo = temp_data[uid]["tipo"]
     parcelas = temp_data[uid]["parcelas"]
@@ -195,7 +194,7 @@ async def salvar_contas_repetidas(uid, update):
         for i in range(parcelas):
             if tipo == "semanal":
                 venc = data_venc + datetime.timedelta(weeks=i)
-            else:  # mensal ou parcelada mensal
+            else:
                 venc = add_months(data_venc, i)
 
             conn.execute("""
@@ -214,13 +213,11 @@ async def salvar_contas_repetidas(uid, update):
     user_states.pop(uid, None)
     temp_data.pop(uid, None)
 
-# 🧠 Interação por texto
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     texto = update.message.text.strip()
     estado = user_states.get(uid)
 
-    # Ações diretas por botão
     if texto == "🚀 Iniciar":
         await start(update, context)
         return
@@ -246,7 +243,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await gerar_inline(update, "SELECT id, descricao, valor FROM contas", "atualizar_")
         return
 
-    # Estados guiados
     if estado == "relatorio_mes":
         try:
             mes, ano = map(int, texto.split("/"))
@@ -266,21 +262,21 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             temp_data[uid]["valor"] = float(texto.replace(",", "."))
             user_states[uid] = "vencimento"
-            await update.message.reply_text("Digite a data de vencimento (aaaa-mm-dd):")
+            await update.message.reply_text("Digite a data de vencimento (dd/mm/aaaa):")
         except:
             await update.message.reply_text("❌ Valor inválido. Digite novamente.")
         return
 
     elif estado == "vencimento":
         try:
-            datetime.date.fromisoformat(texto)
-            temp_data[uid]["vencimento"] = texto
+            iso = data_str_para_iso(texto)
+            temp_data[uid]["vencimento"] = iso
             user_states[uid] = "tipo"
             await update.message.reply_text(
                 "Selecione o tipo da conta:", reply_markup=teclado_tipo_conta()
             )
-        except:
-            await update.message.reply_text("❌ Data inválida. Use aaaa-mm-dd.")
+        except Exception:
+            await update.message.reply_text("❌ Data inválida. Use dd/mm/aaaa.")
         return
 
     elif estado == "tipo":
