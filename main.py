@@ -9,6 +9,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, filters
 )
+import nest_asyncio
 import asyncio
 
 # Estados e dados temporários por usuário
@@ -240,8 +241,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("❌ Número inválido de parcelas.")
 
-# Ponto de entrada principal
-if __name__ == '__main__':
+# Execução segura no Railway
+if __name__ == "__main__":
+    nest_asyncio.apply()
+
     async def main():
         print("🔄 Inicializando...")
         init_db()
@@ -256,7 +259,4 @@ if __name__ == '__main__':
         print("✅ Bot rodando no Railway...")
         await app.run_polling()
 
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        print(f"❌ Erro ao iniciar o bot: {e}")
+    asyncio.get_event_loop().run_until_complete(main())
