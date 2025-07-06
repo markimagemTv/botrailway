@@ -12,9 +12,11 @@ from telegram.ext import (
 import nest_asyncio
 import asyncio
 
+# Estados e dados temporários por usuário
 user_states = {}
 temp_data = {}
 
+# 📦 Banco de dados
 def get_db():
     return sqlite3.connect("despesas.db")
 
@@ -28,20 +30,20 @@ def init_db():
                 vencimento TEXT,
                 status TEXT,
                 tipo TEXT,
-                parcelas_restantes INTEGER,
-                vencimento_pago TEXT
+                parcelas_restantes INTEGER
             )
         ''')
 
+# ⌨️ Teclados
 def teclado_principal():
     buttons = [
-        [KeyboardButton("\U0001F680 Iniciar")],
-        [KeyboardButton("\u2795 Adicionar Conta")],
-        [KeyboardButton("\u2705 Marcar Conta como Paga")],
-        [KeyboardButton("\U0001F4CA Relatório Mensal")],
-        [KeyboardButton("\U0001F4C5 Relatório por Mês")],
-        [KeyboardButton("\U0001F4DD Atualizar Conta")],
-        [KeyboardButton("\u274C Remover Conta")]
+        [KeyboardButton("🚀 Iniciar")],
+        [KeyboardButton("➕ Adicionar Conta")],
+        [KeyboardButton("✅ Marcar Conta como Paga")],
+        [KeyboardButton("📊 Relatório Mensal")],
+        [KeyboardButton("📅 Relatório por Mês")],
+        [KeyboardButton("📝 Atualizar Conta")],
+        [KeyboardButton("❌ Remover Conta")]
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
@@ -49,15 +51,17 @@ def teclado_tipo_conta():
     tipos = [["Simples", "Parcelada"], ["Repetir Semanal", "Repetir Mensal"]]
     return ReplyKeyboardMarkup(tipos, resize_keyboard=True, one_time_keyboard=True)
 
+# 🟢 /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "\U0001F44B Olá! Bem-vindo ao *Gerenciador de Despesas*!",
+        "👋 Olá! Bem-vindo ao *Gerenciador de Despesas*!",
         reply_markup=teclado_principal(),
         parse_mode="Markdown"
     )
     user_states.pop(update.message.from_user.id, None)
     temp_data.pop(update.message.from_user.id, None)
 
+# 📊 Relatórios
 async def relatorio_mensal(update: Update):
     hoje = datetime.date.today()
     await relatorio_por_mes(update, hoje.month, hoje.year)
@@ -65,37 +69,30 @@ async def relatorio_mensal(update: Update):
 async def relatorio_por_mes(update: Update, mes: int, ano: int):
     mes_str, ano_str = f"{mes:02d}", str(ano)
     with get_db() as conn:
-        contas = conn.execute("""
-            SELECT descricao, valor,
-                CASE WHEN status = 'paga' AND vencimento_pago IS NOT NULL THEN vencimento_pago ELSE vencimento END as data_referencia,
-                status
-            FROM contas
-            WHERE 
-                (
-                    (status = 'paga' AND strftime('%m', vencimento_pago) = ? AND strftime('%Y', vencimento_pago) = ?)
-                    OR
-                    (status != 'paga' AND strftime('%m', vencimento) = ? AND strftime('%Y', vencimento) = ?)
-                )
-        """, (mes_str, ano_str, mes_str, ano_str)).fetchall()
+        contas = conn.execute(
+            "SELECT descricao, valor, vencimento, status FROM contas "
+            "WHERE strftime('%m', vencimento) = ? AND strftime('%Y', vencimento) = ?",
+            (mes_str, ano_str)
+        ).fetchall()
 
     if not contas:
-        await update.message.reply_text(f"\U0001F4CA Nenhuma conta encontrada para {mes_str}/{ano_str}.")
+        await update.message.reply_text(f"📊 Nenhuma conta encontrada para {mes_str}/{ano_str}.")
         return
 
-    texto = f"\U0001F4C5 *Contas de {mes_str}/{ano_str}:*\n\n"
+    texto = f"📅 *Contas de {mes_str}/{ano_str}:*\n\n"
     total_pagas = total_pendentes = 0
     for desc, val, venc, status in contas:
-        venc_fmt = datetime.datetime.strptime(venc, "%Y-%m-%d").strftime("%d/%m/%Y")
-        emoji = "\u2705" if status == "paga" else "\u23F3"
-        texto += f"{emoji} *{desc}* - R${val:.2f} - Venc: `{venc_fmt}`\n"
+        emoji = "✅" if status == "paga" else "⏳"
+        texto += f"{emoji} *{desc}* - R${val:.2f} - Venc: `{venc}`\n"
         if status == "paga":
             total_pagas += val
         else:
             total_pendentes += val
-    texto += f"\n\U0001F4B0 *Total pago:* R${total_pagas:.2f}\n\u231B *Pendente:* R${total_pendentes:.2f}"
+    texto += f"\n💰 *Total pago:* R${total_pagas:.2f}\n⌛ *Pendente:* R${total_pendentes:.2f}"
 
     await update.message.reply_text(texto, parse_mode="Markdown")
 
+# ⏺️ Botões Inline
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -106,7 +103,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if data.startswith("remover_"):
             idc = int(data.split("_")[1])
             conn.execute("DELETE FROM contas WHERE id = ?", (idc,))
-            await query.edit_message_text("\U0001F5D1 Conta removida com sucesso!")
+            await query.edit_message_text("🗑️ Conta removida com sucesso!")
 
         elif data.startswith("atualizar_"):
             idc = int(data.split("_")[1])
@@ -116,67 +113,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif data.startswith("pagar_"):
             idc = int(data.split("_")[1])
-            conta = conn.execute("SELECT descricao, valor, vencimento, status, tipo FROM contas WHERE id = ?", (idc,)).fetchone()
-            if conta is None:
-                await query.edit_message_text("Conta não encontrada.")
-                return
-            descricao, valor, vencimento, status, tipo = conta
-            hoje = datetime.date.today().isoformat()
-            conn.execute("UPDATE contas SET status = 'paga', vencimento_pago = ? WHERE id = ?", (hoje, idc))
+            conn.execute("UPDATE contas SET status = 'paga' WHERE id = ?", (idc,))
+            await query.edit_message_text("✅ Conta marcada como paga!")
 
-            temp_data[uid] = {
-                "id": idc,
-                "descricao": descricao,
-                "valor": valor,
-                "vencimento": vencimento,
-                "tipo": tipo,
-            }
-            user_states[uid] = "confirmar_repetir"
-
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("Sim", callback_data="repetir_sim")],
-                [InlineKeyboardButton("Não", callback_data="repetir_nao")]
-            ])
-            await query.edit_message_text(
-                "Conta marcada como paga!\nDeseja repetir essa conta para o próximo mês com o mesmo dia de vencimento?",
-                reply_markup=keyboard
-            )
-
-        elif data == "repetir_sim":
-            if uid not in temp_data:
-                await query.edit_message_text("Erro: dados da conta não encontrados.")
-                return
-            conta = temp_data[uid]
-            vencimento_atual = datetime.datetime.strptime(conta["vencimento"], "%Y-%m-%d").date()
-
-            ano = vencimento_atual.year + (vencimento_atual.month // 12)
-            mes = vencimento_atual.month % 12 + 1
-            dia = vencimento_atual.day
-
-            try:
-                proximo_vencimento = datetime.date(ano, mes, dia)
-            except ValueError:
-                import calendar
-                ultimo_dia = calendar.monthrange(ano, mes)[1]
-                proximo_vencimento = datetime.date(ano, mes, ultimo_dia)
-
-            conn.execute("""
-                INSERT INTO contas (descricao, valor, vencimento, status, tipo, parcelas_restantes)
-                VALUES (?, ?, ?, 'pendente', ?, NULL)
-            """, (conta["descricao"], conta["valor"], proximo_vencimento.isoformat(), conta["tipo"]))
-
-            await query.edit_message_text(
-                "Conta repetida para o próximo mês com vencimento em {}.".format(proximo_vencimento.strftime("%d/%m/%Y"))
-            )
-
-            user_states.pop(uid, None)
-            temp_data.pop(uid, None)
-
-        elif data == "repetir_nao":
-            await query.edit_message_text("Ok, não será criada uma nova conta.")
-            user_states.pop(uid, None)
-            temp_data.pop(uid, None)
-
+# 💾 Contas repetidas
 async def salvar_contas_repetidas(uid, update):
     tipo = temp_data[uid]["tipo"]
     parcelas = temp_data[uid]["parcelas"]
@@ -184,78 +124,53 @@ async def salvar_contas_repetidas(uid, update):
 
     with get_db() as conn:
         for i in range(parcelas):
-            if tipo == "semanal":
-                venc = data + datetime.timedelta(weeks=i)
-            else:  # mensal
-                ano = data.year + ((data.month - 1 + i) // 12)
-                mes = (data.month - 1 + i) % 12 + 1
-                dia = data.day
-                try:
-                    venc = datetime.date(ano, mes, dia)
-                except ValueError:
-                    import calendar
-                    ultimo_dia = calendar.monthrange(ano, mes)[1]
-                    venc = datetime.date(ano, mes, ultimo_dia)
+            venc = data + datetime.timedelta(weeks=i) if tipo == "semanal" else data + datetime.timedelta(days=30 * i)
             conn.execute("""
                 INSERT INTO contas (descricao, valor, vencimento, status, tipo, parcelas_restantes)
                 VALUES (?, ?, ?, 'pendente', ?, ?)
             """, (
                 temp_data[uid]["descricao"],
                 temp_data[uid]["valor"],
-                venc.isoformat(),
+                venc.date().isoformat(),
                 tipo,
                 parcelas - i
             ))
-    await update.message.reply_text("\U0001F4BE Contas salvas com sucesso!", reply_markup=teclado_principal())
+    await update.message.reply_text("💾 Contas salvas com sucesso!", reply_markup=teclado_principal())
     user_states.pop(uid, None)
     temp_data.pop(uid, None)
 
-async def gerar_inline(update, sql, prefixo):
-    with get_db() as conn:
-        contas = conn.execute(sql).fetchall()
-    if not contas:
-        await update.message.reply_text("Nenhuma conta encontrada.")
-        return
-    if "vencimento" in sql:
-        keyboard = [[
-            InlineKeyboardButton(
-                f"{desc} - Venc: {datetime.datetime.strptime(venc, '%Y-%m-%d').strftime('%d/%m/%Y')}",
-                callback_data=f"{prefixo}{idc}"
-            )
-        ] for idc, desc, venc in contas]
-    else:
-        keyboard = [[InlineKeyboardButton(desc, callback_data=f"{prefixo}{idc}")] for idc, desc in contas]
-    await update.message.reply_text("Selecione uma opção:", reply_markup=InlineKeyboardMarkup(keyboard))
-
+# 🧠 Interação por texto
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     texto = update.message.text.strip()
     estado = user_states.get(uid)
 
-    if texto == "\U0001F680 Iniciar":
+    # Ações diretas por botão
+    if texto == "🚀 Iniciar":
         await start(update, context)
-    elif texto == "\u2795 Adicionar Conta":
+    elif texto == "➕ Adicionar Conta":
         user_states[uid] = "descricao"
         temp_data[uid] = {}
         await update.message.reply_text("Digite a descrição da conta:")
-    elif texto == "\u2705 Marcar Conta como Paga":
-        await gerar_inline(update, "SELECT id, descricao, vencimento FROM contas WHERE status = 'pendente'", "pagar_")
-    elif texto == "\U0001F4CA Relatório Mensal":
+    elif texto == "✅ Marcar Conta como Paga":
+        await gerar_inline(update, "SELECT id, descricao FROM contas WHERE status = 'pendente'", "pagar_")
+    elif texto == "📊 Relatório Mensal":
         await relatorio_mensal(update)
-    elif texto == "\U0001F4C5 Relatório por Mês":
+    elif texto == "📅 Relatório por Mês":
         user_states[uid] = "relatorio_mes"
         await update.message.reply_text("Digite o mês e o ano (mm/aaaa):")
-    elif texto == "\u274C Remover Conta":
+    elif texto == "❌ Remover Conta":
         await gerar_inline(update, "SELECT id, descricao FROM contas", "remover_")
-    elif texto == "\U0001F4DD Atualizar Conta":
+    elif texto == "📝 Atualizar Conta":
         await gerar_inline(update, "SELECT id, descricao FROM contas", "atualizar_")
 
+    # Estados guiados
     elif estado == "relatorio_mes":
         try:
             mes, ano = map(int, texto.split("/"))
             await relatorio_por_mes(update, mes, ano)
         except:
-            await update.message.reply_text("\u274C Formato inválido. Use mm/aaaa.")
+            await update.message.reply_text("❌ Formato inválido. Use mm/aaaa.")
         user_states.pop(uid, None)
 
     elif estado == "descricao":
@@ -269,76 +184,90 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_states[uid] = "vencimento"
             await update.message.reply_text("Digite o vencimento (dd/mm/aaaa):")
         except:
-            await update.message.reply_text("\u274C Valor inválido.")
+            await update.message.reply_text("❌ Valor inválido.")
 
     elif estado == "vencimento":
         try:
             data = datetime.datetime.strptime(texto, "%d/%m/%Y").date()
             temp_data[uid]["vencimento"] = data.isoformat()
-            user_states[uid] = "tipo"
-            await update.message.reply_text("Selecione o tipo da conta:", reply_markup=teclado_tipo_conta())
+            user_states[uid] = "tipo_conta"
+            await update.message.reply_text("Essa conta é:", reply_markup=teclado_tipo_conta())
         except:
-            await update.message.reply_text("\u274C Data inválida.")
+            await update.message.reply_text("❌ Data inválida.")
 
-    elif estado == "tipo":
+    elif estado == "tipo_conta":
         tipo = texto.lower()
-        if tipo not in ("simples", "parcelada", "repetir semanal", "repetir mensal"):
-            await update.message.reply_text("\u274C Tipo inválido. Escolha um dos botões.")
-            return
-        temp_data[uid]["tipo"] = tipo
         if tipo == "parcelada":
             user_states[uid] = "parcelas"
+            temp_data[uid]["tipo"] = "parcelada"
             await update.message.reply_text("Quantas parcelas?")
-        elif tipo in ("repetir semanal", "repetir mensal"):
-            user_states[uid] = "parcelas"
-            await update.message.reply_text("Quantas vezes deseja repetir?")
+        elif tipo == "repetir semanal":
+            temp_data[uid].update({"tipo": "semanal", "parcelas": 52})
+            await salvar_contas_repetidas(uid, update)
+        elif tipo == "repetir mensal":
+            temp_data[uid].update({"tipo": "mensal", "parcelas": 12})
+            await salvar_contas_repetidas(uid, update)
         else:
-            # simples: salvar direto
+            temp_data[uid]["tipo"] = "simples"
             with get_db() as conn:
                 conn.execute("""
                     INSERT INTO contas (descricao, valor, vencimento, status, tipo, parcelas_restantes)
                     VALUES (?, ?, ?, 'pendente', ?, NULL)
-                """, (temp_data[uid]["descricao"], temp_data[uid]["valor"], temp_data[uid]["vencimento"], tipo))
-            await update.message.reply_text("\U0001F4BE Conta adicionada!", reply_markup=teclado_principal())
+                """, (
+                    temp_data[uid]["descricao"],
+                    temp_data[uid]["valor"],
+                    temp_data[uid]["vencimento"],
+                    "simples"
+                ))
+            await update.message.reply_text("💾 Conta adicionada com sucesso!", reply_markup=teclado_principal())
             user_states.pop(uid, None)
             temp_data.pop(uid, None)
 
     elif estado == "parcelas":
         try:
-            parcelas = int(texto)
-            if parcelas < 1:
-                raise ValueError
-            temp_data[uid]["parcelas"] = parcelas
+            temp_data[uid]["parcelas"] = int(texto)
             await salvar_contas_repetidas(uid, update)
         except:
-            await update.message.reply_text("\u274C Número inválido.")
+            await update.message.reply_text("❌ Número inválido de parcelas.")
 
     elif estado == "update_valor":
         try:
-            valor = float(texto.replace(",", "."))
+            novo_valor = float(texto.replace(",", "."))
             idc = temp_data[uid]["id"]
             with get_db() as conn:
-                conn.execute("UPDATE contas SET valor = ? WHERE id = ?", (valor, idc))
-            await update.message.reply_text("\U0001F4DD Valor atualizado!", reply_markup=teclado_principal())
+                conn.execute("UPDATE contas SET valor = ? WHERE id = ?", (novo_valor, idc))
+            await update.message.reply_text("✅ Valor atualizado com sucesso!", reply_markup=teclado_principal())
             user_states.pop(uid, None)
             temp_data.pop(uid, None)
         except:
-            await update.message.reply_text("\u274C Valor inválido.")
+            await update.message.reply_text("❌ Valor inválido.")
 
-    else:
-        await update.message.reply_text("Comando não reconhecido. Use os botões do teclado.")
+# 🔁 Geração de botões inline genérica
+async def gerar_inline(update, sql, prefixo):
+    with get_db() as conn:
+        contas = conn.execute(sql).fetchall()
+    if not contas:
+        await update.message.reply_text("Nenhuma conta encontrada.")
+        return
+    keyboard = [[InlineKeyboardButton(desc, callback_data=f"{prefixo}{idc}")] for idc, desc in contas]
+    await update.message.reply_text("Selecione uma opção:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def main():
-    init_db()
-    token = os.getenv("TELEGRAM_TOKEN")
-    application = ApplicationBuilder().token(token).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
-    application.add_handler(CallbackQueryHandler(button_handler))
-
-    await application.run_polling()
-
+# 🚀 Execução Railway-safe
 if __name__ == "__main__":
     nest_asyncio.apply()
-    asyncio.run(main())
+
+    async def main():
+        print("🔄 Inicializando...")
+        init_db()
+        token = os.getenv("BOT_TOKEN")
+        if not token:
+            print("❌ BOT_TOKEN não encontrado.")
+            return
+        app = ApplicationBuilder().token(token).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+        app.add_handler(CallbackQueryHandler(button_handler))
+        print("✅ Bot rodando no Railway...")
+        await app.run_polling()
+
+    asyncio.get_event_loop().run_until_complete(main())
