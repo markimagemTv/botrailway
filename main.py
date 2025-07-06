@@ -76,8 +76,9 @@ async def relatorio_por_mes(update: Update, mes: int, ano: int):
     texto = f"\U0001F4C5 *Contas de {mes_str}/{ano_str}:*\n\n"
     total_pagas = total_pendentes = 0
     for desc, val, venc, status in contas:
+        venc_fmt = datetime.datetime.strptime(venc, "%Y-%m-%d").strftime("%d/%m/%Y")
         emoji = "\u2705" if status == "paga" else "\u23F3"
-        texto += f"{emoji} *{desc}* - R${val:.2f} - Venc: `{venc}`\n"
+        texto += f"{emoji} *{desc}* - R${val:.2f} - Venc: `{venc_fmt}`\n"
         if status == "paga":
             total_pagas += val
         else:
@@ -137,7 +138,7 @@ async def gerar_inline(update, sql, prefixo):
     if not contas:
         await update.message.reply_text("Nenhuma conta encontrada.")
         return
-    keyboard = [[InlineKeyboardButton(desc, callback_data=f"{prefixo}{idc}")] for idc, desc in contas]
+    keyboard = [[InlineKeyboardButton(f"{desc} - Venc: {datetime.datetime.strptime(venc, '%Y-%m-%d').strftime('%d/%m/%Y')}", callback_data=f"{prefixo}{idc}")] for idc, desc, venc in contas] if "vencimento" in sql else [[InlineKeyboardButton(desc, callback_data=f"{prefixo}{idc}")] for idc, desc in contas]
     await update.message.reply_text("Selecione uma opção:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -152,7 +153,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         temp_data[uid] = {}
         await update.message.reply_text("Digite a descrição da conta:")
     elif texto == "\u2705 Marcar Conta como Paga":
-        await gerar_inline(update, "SELECT id, descricao FROM contas WHERE status = 'pendente'", "pagar_")
+        await gerar_inline(update, "SELECT id, descricao, vencimento FROM contas WHERE status = 'pendente'", "pagar_")
     elif texto == "\U0001F4CA Relatório Mensal":
         await relatorio_mensal(update)
     elif texto == "\U0001F4C5 Relatório por Mês":
