@@ -8,16 +8,19 @@ from telegram.ext import (
 
 JOGOS_FILE = "jogos.json"
 
-ADMIN_USER_ID = 123456789  # substitua pelo seu ID de usuário do Telegram
+# ADMIN_USER_ID será passado como variável de ambiente
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 
 
 # Utilitários
 def carregar_jogos():
     if not os.path.exists(JOGOS_FILE):
         return []
-    with open(JOGOS_FILE, "r") as f:
-        return json.load(f)
-
+    try:
+        with open(JOGOS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return []
 
 def salvar_jogo(jogo):
     jogos = carregar_jogos()
@@ -27,9 +30,8 @@ def salvar_jogo(jogo):
 
 
 # Comandos
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Olá! Sou o bot da Mega-Sena 🎯\nUse /addjogo para adicionar uma aposta.")
+    await update.message.reply_text("🎯 Bot da Mega-Sena online!\nUse /addjogo para adicionar uma aposta.")
 
 async def addjogo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -95,9 +97,12 @@ async def conferir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Erro na conferência: {e}")
 
 
-# Inicializar Bot
+# Inicialização
 if __name__ == '__main__':
     TOKEN = os.getenv("BOT_TOKEN")
+    if not TOKEN:
+        print("❌ BOT_TOKEN não encontrado.")
+        exit()
 
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
