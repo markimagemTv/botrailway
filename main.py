@@ -1,14 +1,29 @@
 import os
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from datetime import datetime
 
 # Dicionário em memória para armazenar despesas por usuário
 despesas = {}
 
+# Teclado personalizado
+keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        ["/add", "/listar", "/limpar"]
+    ],
+    resize_keyboard=True
+)
+
 # Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Olá! Eu estou funcionando no Railway 😎\nUse /add, /listar ou /limpar para gerenciar suas despesas.")
+    await update.message.reply_text(
+        "Olá! Eu estou funcionando no Railway 😎\n\n"
+        "Use os botões abaixo ou digite um comando:\n"
+        "➕ /add valor descrição\n"
+        "📋 /listar\n"
+        "🧹 /limpar",
+        reply_markup=keyboard
+    )
 
 # Comando /add valor descrição
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
