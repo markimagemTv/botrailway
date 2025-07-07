@@ -45,6 +45,12 @@ def add_months(orig_date, months):
     day = min(orig_date.day, 28)  # evita problemas com fevereiro
     return datetime.date(year, month, day)
 
+def parse_date_br(date_str):
+    return datetime.datetime.strptime(date_str, "%d/%m/%Y").date()
+
+def format_date_br(date):
+    return date.strftime("%d/%m/%Y")
+
 # Estados e dados temporários
 user_states = {}
 temp_data = {}
@@ -56,7 +62,7 @@ def teclado_principal():
         [KeyboardButton("➕ Adicionar Conta")],
         [KeyboardButton("✅ Marcar Conta como Paga")],
         [KeyboardButton("📊 Relatório Mensal")],
-        [KeyboardButton("📅 Relatório por Mês")],
+        [KeyboardButton("🗕️ Relatório por Mês")],
         [KeyboardButton("📝 Atualizar Conta")],
         [KeyboardButton("❌ Remover Conta")]
     ]
@@ -78,8 +84,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Handler de mensagens
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... mantido igual, conforme já trabalhado anteriormente ...
-    pass
+    uid = update.message.from_user.id
+    text = update.message.text
+
+    if text == "➕ Adicionar Conta":
+        user_states[uid] = "add_desc"
+        await update.message.reply_text("📝 Digite a descrição da conta:")
+
+    elif user_states.get(uid) == "add_desc":
+        temp_data[uid] = {"descricao": text}
+        user_states[uid] = "add_valor"
+        await update.message.reply_text("💰 Digite o valor da conta (ex: 123.45):")
+
+    elif user_states.get(uid) == "add_valor":
+        try:
+            valor = float(text.replace(",", "."))
+            temp_data[uid]["valor"] = valor
+            user_states[uid] = "add_venc"
+            await update.message.reply_text("📅 Digite a data de vencimento (dd/mm/aaaa):")
+        except ValueError:
+            await update.message.reply_text("❌ Valor inválido. Tente novamente.")
+
+    elif user_states.get(uid) == "add_venc":
+        try:
+            venc = parse_date_br(text)
+            temp_data[uid]["vencimento"] = venc.isoformat()
+            user_states[uid] = "add_tipo"
+            await update.message.reply_text("📌 Escolha o tipo da conta:", reply_markup=teclado_tipo_conta())
+        except ValueError:
+            await update.message.reply_text("❌ Data inválida. Use o formato dd/mm/aaaa.")
+
+    elif user_states.get(uid) == "add_tipo":
+        tipo = text
+        parcelas = 1 if "Parcelada" not in tipo else 3
+        data = temp_data.get(uid, {})
+
+        with get_db() as conn:
+            conn.execute("""
+                INSERT INTO contas (descricao, valor, vencimento, status, tipo, parcelas_restantes)
+                VALUES (?, ?, ?, 'pendente', ?, ?)
+            """, (
+                data["descricao"],
+                data["valor"],
+                data["vencimento"],
+                tipo,
+                parcelas
+            ))
+        await update.message.reply_text("✅ Conta adicionada com sucesso!", reply_markup=teclado_principal())
+        user_states.pop(uid, None)
+        temp_data.pop(uid, None)
+
+    else:
+        await update.message.reply_text("ℹ️ Comando ainda não implementado neste exemplo.")
 
 # Handler de botões inline
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -106,7 +162,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             temp_data[uid] = {"conta": dict(conta)}
 
             await query.edit_message_text(
-                "✅ Conta marcada como paga!\n\nDeseja repetir essa conta para o próximo mês?",
+                f"✅ Conta marcada como paga!\n\nDeseja repetir essa conta para o próximo mês?",
                 reply_markup=InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton("🔁 Sim", callback_data="repetir_sim"),
@@ -146,7 +202,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     init_db()
-    nest_asyncio.apply()  # Railway e Jupyter friendly
+    nest_asyncio.apply()
 
     TOKEN = os.environ.get("BOT_TOKEN")
     if not TOKEN:
