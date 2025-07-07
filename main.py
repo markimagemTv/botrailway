@@ -25,18 +25,20 @@ def get_db():
     return conn
 
 def init_db():
-    with get_db() as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS contas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                descricao TEXT,
-                valor REAL,
-                vencimento TEXT,
-                status TEXT,
-                tipo TEXT,
-                parcelas_restantes INTEGER
-            )
-        ''')
+    conn = get_db()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS contas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            descricao TEXT,
+            valor REAL,
+            vencimento TEXT,
+            status TEXT,
+            tipo TEXT,
+            parcelas_restantes INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
 # Utilitários
 def add_months(orig_date, months):
@@ -77,7 +79,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Olá! Bem-vindo ao *Gerenciador de Despesas*!",
         reply_markup=teclado_principal(),
-        parse_mode="Markdown"
+        parse_mode="MarkdownV2"  # Corrigido para MarkdownV2 para segurança
     )
     user_states.pop(update.message.from_user.id, None)
     temp_data.pop(update.message.from_user.id, None)
@@ -116,10 +118,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif user_states.get(uid) == "add_tipo":
         tipo = text
-        parcelas = 1 if "Parcelada" not in tipo else 3
-        data = temp_data.get(uid, {})
+        parcelas = 1
+        if "Parcelada" in tipo:
+            parcelas = 3  # pode ser melhorado para perguntar o número de parcelas
 
-        with get_db() as conn:
+        data = temp_data.get(uid, {})
+        try:
+            conn = get_db()
             conn.execute("""
                 INSERT INTO contas (descricao, valor, vencimento, status, tipo, parcelas_restantes)
                 VALUES (?, ?, ?, 'pendente', ?, ?)
@@ -130,6 +135,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 tipo,
                 parcelas
             ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Erro ao inserir no DB: {e}")
+            await update.message.reply_text("❌ Erro ao adicionar conta. Tente novamente.")
+            user_states.pop(uid, None)
+            temp_data.pop(uid, None)
+            return
+
         await update.message.reply_text("✅ Conta adicionada com sucesso!", reply_markup=teclado_principal())
         user_states.pop(uid, None)
         temp_data.pop(uid, None)
@@ -144,7 +158,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = query.from_user.id
     data = query.data
 
-    with get_db() as conn:
+    conn = get_db()
+    try:
         if data.startswith("pagar_"):
             idc = int(data.split("_")[1])
             cursor = conn.execute("SELECT * FROM contas WHERE id = ?", (idc,))
@@ -197,6 +212,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif data == "repetir_nao":
             await query.edit_message_text("✅ Conta paga. Nenhuma repetição foi criada.")
             temp_data.pop(uid, None)
+
+    except Exception as e:
+        logger.error(f"Erro no button_handler: {e}")
+        await query.edit_message_text("❌ Ocorreu um erro inesperado.")
+    finally:
+        conn.close()
 
 # Execução principal
 
